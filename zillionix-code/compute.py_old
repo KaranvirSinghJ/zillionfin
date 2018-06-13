@@ -1,0 +1,131 @@
+# Load the necessary packages and modules
+from pandas_datareader import data as pdr
+import fix_yahoo_finance
+import pandas as pd
+from pyspark import SparkConf
+from pyspark import SparkContext
+from pyspark import SQLContext
+from pyspark.sql import HiveContext
+from pyspark.sql import Row
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, DateType , DoubleType
+from pyspark.sql import Window
+from pyspark.sql.functions import mean
+from pyspark import sql
+HDFS_MASTER = 'quickstart.cloudera'
+
+conf = SparkConf()
+#conf.setMaster('yarn-client')
+conf.setAppName('Zillionix')
+conf.set('spark.executor.instances', 10)
+sc = SparkContext(conf=conf)
+APP_NAME='Zillionix'
+fname='ticker_list.txt'
+# Simple Moving Average 
+def SMA(data, ndays):
+    #window = Window.partitionBy('ticker').orderBy('date') 
+    df = data.toPandas()
+    #SMA = pd.Series(pd.rolling_mean((data['close']).over(window), ndays), name = 'SMA') 
+    #SMA= datai.groupby('ticker')['close'].apply(lambda x:x.rolling(center=False,window=10).mean())
+    #SMA = pd.Series(pd.rolling_mean(data['close'], ndays), name = 'SMA') 
+    #data = data.join(SMA) 
+    #SMA= pd.Series(SMA, name = 'SMA') 
+    #SMA = data.groupby('ticker')['close'].apply(lambda x:x.rolling(center=False,window=2).mean(), name='SMA')
+    #SMA = datai.merge(SMA.to_frame(), left_index=True, right_index=True)
+    #SMA = pd.concat( data, SMA)
+    #data = data.join(SMA) 
+    df['SMA'] = df['close'].rolling(window=ndays,center=False).mean()
+    print df
+    print "-------"
+    #print datai
+    return df
+# Exponentially-weighted Moving Average 
+def EWMA(data, ndays):
+    data = data.toPandas() 
+    #EMA = pd.Series(pd.ewma(data['close'], span = ndays, min_periods = ndays - 1), 
+    data['EMA'] = pd.ewma(data['close'],span= ndays, halflife=None, min_periods=ndays -1)
+    #name = 'EWMA_' + str(ndays)) 
+    print data.head()
+    #data = data.join(EMA) 
+    return data
+def HiveDF(ticker):
+    "This creates a new DF from the input hdfs files"
+    #conf = SparkConf().setAppName(APP_NAME)
+    #sc = SparkContext(conf=conf)
+    hc = HiveContext(sc)
+    hc.sql("show databases").show()
+    query = "select * from stock.daily_stock where tickt ='"+ ticker+"'"
+    df = hc.sql(query)    
+    #sqlContext = SQLContext(sc)
+    #hsc = HiveContext(sc)
+    #df = hsc.read.format("com.databricks.spark.csv").option("delimeter",",").option("header","false").option("inferSchema","true").load(hdfsFile, schema=schema)
+    #df = hsc.sql("SELECT * from stock.daily_stock limit 10")
+    df.printSchema()
+    df.show(5)
+    return df
+
+def dfSave(df2, table_name):
+    "This is a function to save the DF"  
+    print type(df2)
+    hc = HiveContext(sc)
+    df2 = hc.createDataFrame(df2)
+    print type(df2)
+    df2.write.saveAsTable(table_name);
+    df2.write.saveAsTable(table_name, format='parquet', mode='overwrite')
+#schema = StructType([ \
+#           StructField("ID", IntegerType(), True), \
+#           StructField("date", StringType(), True), \
+#           StructField("open", StringType(), True), \
+#           StructField("high", StringType(), True), \
+#           StructField("low", StringType(), True), \
+#           StructField("close", DoubleType(), True), \
+#           StructField("Adj Close", DoubleType(), True), \
+#           StructField("volume", StringType(), True), \
+#           StructField("ticker", StringType(), True),  \
+#           StructField("updated_at", StringType(), True), \
+#           StructField("SMA", StringType(), True) ])
+#hdfsFile = "hdfs://quickstart.cloudera:8020/user/cloudera/stocksData/daily_stock/part*"
+
+def createDataFrame():
+    with open(fname) as f:
+        ticker_list = f.read().splitlines()
+        i=0
+        n=50
+        ew=200
+        DataFrame_SMA=pd.DataFrame();
+        DataFrame_EWMA=pd.DataFrame();
+        for ticker in ticker_list:
+            data=HiveDF(ticker) 
+            if i==0:     
+                SMA_DF = SMA(data,n)
+                EWMA_DF = EWMA(data, ew)     
+                DataFrame_SMA = SMA_DF
+                DataFrame_EWMA= EWMA_DF
+            else:
+                SMA_DF = SMA(data, n)
+                EWMA_DF = EWMA(data, ew)
+                #DataFrame_SMA.append(SMA_DF)
+                #DataFrame_EWMA.append(EWMA_DF)
+                #dfSave(DataFrame_SMA, 'hdfs://quickstart.cloudera:8020/user/cloudera/stocksData/daily_SMA/') 
+                DataFrame_SMA=pd.concat([DataFrame_SMA, SMA_DF])
+                DataFrame_EWMA=pd.concat([DataFrame_EWMA, EWMA_DF])
+            i=i+1
+    dfSave(DataFrame_SMA, "stock.`daily_sma`")
+    dfSave(DataFrame_EWMA, "stock.daily_ewma")                
+createDataFrame()                
+#data = HiveDF(hdfsFile, schema)
+#data = pd.DataFrame(data)
+#close = data['close']
+#close.head();
+# Compute the 50-day SMA for Stock
+#n = 50
+#SMA_50 = SMA(data,n)
+#SMA_NIFTY = SMA_NIFTY.dropna()
+#SMA = SMA_NIFTY['SMA']
+
+# Compute the 200-day EWMA for Stock
+#ew = 200
+#EWMA_200 = EWMA(data,ew)
+#EWMA_NIFTY = EWMA_NIFTY.dropna()
+#EWMA = EWMA_NIFTY['EWMA_200']
+#dfSave(SMA_NIFTY)
+#dfSave(EWMA_200)
